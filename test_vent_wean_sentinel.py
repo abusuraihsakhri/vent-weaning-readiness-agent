@@ -264,6 +264,65 @@ class TestCLI(unittest.TestCase):
         ret = main([])
         self.assertEqual(ret, 1)
 
+    def test_audit_command(self):
+        ret = main(["audit", "--task-id", "TEST-001"])
+        self.assertEqual(ret, 0)
+
+    def test_chat_command(self):
+        ret = main(["chat", "test", "query"])
+        self.assertEqual(ret, 0)
+
+    def test_verify_audit_command(self):
+        ret = main(["verify-audit"])
+        self.assertEqual(ret, 0)
+
+
+class TestInputValidation(unittest.TestCase):
+    """Test input validation for assess_weaning."""
+
+    def test_negative_rr_raises(self):
+        with self.assertRaises(ValueError):
+            assess_weaning(respiratory_rate=-5, tidal_volume_ml=500)
+
+    def test_zero_vt_raises(self):
+        with self.assertRaises(ValueError):
+            assess_weaning(respiratory_rate=15, tidal_volume_ml=0)
+
+    def test_invalid_fio2_raises(self):
+        with self.assertRaises(ValueError):
+            assess_weaning(respiratory_rate=15, tidal_volume_ml=500, fio2=1.5)
+
+    def test_negative_peep_raises(self):
+        with self.assertRaises(ValueError):
+            assess_weaning(respiratory_rate=15, tidal_volume_ml=500, peep=-5)
+
+    def test_negative_pao2_raises(self):
+        with self.assertRaises(ValueError):
+            assess_weaning(respiratory_rate=15, tidal_volume_ml=500, pao2=-10)
+
+    def test_negative_paco2_raises(self):
+        with self.assertRaises(ValueError):
+            assess_weaning(respiratory_rate=15, tidal_volume_ml=500, paco2=-10)
+
+    def test_valid_fio2_range(self):
+        """FiO2 of 0.0 and 1.0 should be valid."""
+        result = assess_weaning(respiratory_rate=15, tidal_volume_ml=500, fio2=0.0)
+        self.assertIsNotNone(result)
+        result = assess_weaning(respiratory_rate=15, tidal_volume_ml=500, fio2=1.0)
+        self.assertIsNotNone(result)
+
+
+class TestPathSafety(unittest.TestCase):
+    """Test path traversal protection."""
+
+    def test_path_traversal_raises(self):
+        with self.assertRaises(ValueError):
+            process_csv("../etc/passwd", "out.csv")
+
+    def test_path_traversal_output_raises(self):
+        with self.assertRaises(ValueError):
+            process_csv("in.csv", "../etc/passwd")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

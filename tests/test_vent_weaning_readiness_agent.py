@@ -3,9 +3,13 @@ Automated Pytest Test Suite for Vent Weaning Readiness Agent.
 Domain: Cardiology & Intensive Care Systems
 Standard: AHA/ACC Guidelines / Surviving Sepsis Campaign
 """
+import os
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
+
+# Set required environment variable before importing agents
+os.environ.setdefault("AUDIT_SECRET_KEY", "test-audit-secret-key-for-unit-tests-only-32chars")
 
 import pytest
 from agents.base import PHIGuard, AuditLogger, SecurityException
