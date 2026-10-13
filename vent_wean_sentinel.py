@@ -4,11 +4,10 @@ VentWean Sentinel: Ventilator Weaning Readiness Calculator
 ==========================================================
 Real clinical calculators for mechanical ventilation liberation:
 
-- Rapid Shallow Breathing Index (RSBI) = f / VT (breaths/min/L)
-    RSBI < 105: Weaning likely to succeed
-    RSBI >= 105: Weaning likely to fail
-- CROP Index = (Cdyn * (PImax - f/VT)) * (PaO2/PAO2) / 100
-    CROP > 13: Weaning likely to succeed
+- Rapid Shallow Breathing Index (RSBI) = f / VT (breaths/min/L).
+  The historical 105 cutoff is descriptive, not an SBT gatekeeper.
+- CROP Index = Cdyn * abs(PImax) * (PaO2 / PAO2_alveolar) / respiratory_rate.
+  A historical threshold of >13 is descriptive, not an extubation decision.
 - Minute Ventilation (VE) = f * VT. Normal: 5-10 L/min
 - Maximum Inspiratory Pressure (MIP/PImax):
     More negative = stronger. MIP < -20 cmH2O: Adequate strength
@@ -24,6 +23,8 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import math
+import os
 import sys
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
@@ -32,6 +33,12 @@ from typing import Any, Dict, List, Optional
 # ---------------------------------------------------------------------------
 # Core calculations
 # ---------------------------------------------------------------------------
+
+def _require_finite(**values: float) -> None:
+    for name, value in values.items():
+        if not math.isfinite(value):
+            raise ValueError(f"{name} must be finite")
+
 
 def rsbi(respiratory_rate: float, tidal_volume_ml: float) -> float:
     """Calculate Rapid Shallow Breathing Index (RSBI).
@@ -48,6 +55,7 @@ def rsbi(respiratory_rate: float, tidal_volume_ml: float) -> float:
     Raises:
         ValueError: If tidal_volume_ml <= 0.
     """
+    _require_finite(respiratory_rate=respiratory_rate, tidal_volume_ml=tidal_volume_ml)
     if tidal_volume_ml <= 0:
         raise ValueError("Tidal volume must be > 0")
     if respiratory_rate < 0:
@@ -68,6 +76,7 @@ def minute_ventilation(respiratory_rate: float, tidal_volume_ml: float) -> float
     Returns:
         Minute ventilation in L/min.
     """
+    _require_finite(respiratory_rate=respiratory_rate, tidal_volume_ml=tidal_volume_ml)
     if respiratory_rate < 0:
         raise ValueError("Respiratory rate must be >= 0")
     if tidal_volume_ml < 0:
@@ -93,6 +102,7 @@ def static_compliance(tidal_volume_ml: float, plateau_pressure: float, peep: flo
     Raises:
         ValueError: If (Pplat - PEEP) <= 0.
     """
+    _require_finite(tidal_volume_ml=tidal_volume_ml, plateau_pressure=plateau_pressure, peep=peep)
     driving = plateau_pressure - peep
     if driving <= 0:
         raise ValueError("(Pplat - PEEP) must be > 0")
@@ -116,6 +126,7 @@ def dynamic_compliance(tidal_volume_ml: float, peak_pressure: float, peep: float
     Returns:
         Dynamic compliance in mL/cmH2O.
     """
+    _require_finite(tidal_volume_ml=tidal_volume_ml, peak_pressure=peak_pressure, peep=peep)
     driving = peak_pressure - peep
     if driving <= 0:
         raise ValueError("(Ppeak - PEEP) must be > 0")
@@ -136,6 +147,7 @@ def mip_interpretation(mip: float) -> str:
     Returns:
         Interpretation string.
     """
+    _require_finite(mip=mip)
     # MIP is often reported as a negative number
     abs_mip = abs(mip)
     if abs_mip >= 30:
@@ -156,15 +168,11 @@ def crop_index(
 ) -> float:
     """Calculate CROP Index for weaning prediction.
 
-    CROP = (Cdyn * (PImax - RSBI)) * (PaO2 / PAO2) / 100
+    CROP = Cdyn * abs(PImax) * (PaO2 / PAO2_alveolar) / respiratory_rate
 
-    Where:
-        Cdyn = dynamic compliance (mL/cmH2O)
-        PImax = maximum inspiratory pressure (absolute value, cmH2O)
-        RSBI = f / VT (breaths/min/L)
-        PaO2/PAO2 = oxygenation ratio
-
-    CROP > 13: Weaning likely to succeed.
+    Cdyn is dynamic compliance (mL/cmH2O), PImax is maximum inspiratory
+    pressure (cmH2O), and PaO2 / PAO2_alveolar is the oxygenation ratio.
+    The historical cutoff >13 is not an extubation decision rule.
 
     Note: PImax is used as its absolute value in the formula.
 
@@ -179,12 +187,18 @@ def crop_index(
     Returns:
         CROP index value.
     """
+    _require_finite(
+        dynamic_compliance_ml=dynamic_compliance_ml, mip=mip,
+        respiratory_rate=respiratory_rate, tidal_volume_ml=tidal_volume_ml,
+        pao2=pao2, pao2_alveolar=pao2_alveolar,
+    )
     if pao2_alveolar <= 0:
         raise ValueError("PAO2 must be > 0")
-    abs_mip = abs(mip)
-    rsbi_val = rsbi(respiratory_rate, tidal_volume_ml)
-    oxygenation_ratio = pao2 / pao2_alveolar
-    return (dynamic_compliance_ml * (abs_mip - rsbi_val)) * oxygenation_ratio / 100.0
+    if respiratory_rate <= 0:
+        raise ValueError("Respiratory rate must be > 0 for CROP")
+    if dynamic_compliance_ml <= 0 or tidal_volume_ml <= 0 or pao2 < 0:
+        raise ValueError("Compliance and tidal volume must be > 0; PaO2 must be >= 0")
+    return dynamic_compliance_ml * abs(mip) * (pao2 / pao2_alveolar) / respiratory_rate
 
 
 def calculate_alveolar_pao2(fio2: float, paco2: float, patm: float = 760.0, ph2o: float = 47.0, rq: float = 0.8) -> float:
@@ -202,6 +216,9 @@ def calculate_alveolar_pao2(fio2: float, paco2: float, patm: float = 760.0, ph2o
     Returns:
         Alveolar PAO2 in mmHg.
     """
+    _require_finite(fio2=fio2, paco2=paco2, patm=patm, ph2o=ph2o, rq=rq)
+    if not 0 <= fio2 <= 1 or paco2 < 0 or rq <= 0 or patm <= ph2o:
+        raise ValueError("Invalid alveolar gas equation parameters")
     return fio2 * (patm - ph2o) - (paco2 / rq)
 
 
@@ -271,9 +288,22 @@ def assess_weaning(
     Returns:
         WeaningAssessment dataclass.
     """
-    # Validate inputs
-    if respiratory_rate < 0:
-        raise ValueError("Respiratory rate must be >= 0")
+    # Validate all supplied measurements before computing or rounding results.
+    measurements = {
+        "respiratory_rate": respiratory_rate,
+        "tidal_volume_ml": tidal_volume_ml,
+        "mip": mip,
+        "plateau_pressure": plateau_pressure,
+        "peak_pressure": peak_pressure,
+        "peep": peep,
+        "pao2": pao2,
+        "fio2": fio2,
+        "paco2": paco2,
+        "pao2_alveolar": pao2_alveolar,
+    }
+    _require_finite(**{k: v for k, v in measurements.items() if v is not None})
+    if respiratory_rate <= 0:
+        raise ValueError("Respiratory rate must be > 0")
     if tidal_volume_ml <= 0:
         raise ValueError("Tidal volume must be > 0")
     if fio2 is not None and not (0.0 <= fio2 <= 1.0):
@@ -288,9 +318,9 @@ def assess_weaning(
     # RSBI
     rsbi_val = rsbi(respiratory_rate, tidal_volume_ml)
     if rsbi_val < 105:
-        rsbi_interp = "RSBI < 105: Weaning likely to succeed"
+        rsbi_interp = "RSBI < 105: historically associated with successful weaning; does not establish that weaning will succeed"
     else:
-        rsbi_interp = "RSBI >= 105: Weaning likely to fail"
+        rsbi_interp = "RSBI >= 105: historical risk marker for weaning failure; does not mean an SBT must fail"
 
     # Minute ventilation
     ve = minute_ventilation(respiratory_rate, tidal_volume_ml)
@@ -329,14 +359,14 @@ def assess_weaning(
             pao2_alveolar = calculate_alveolar_pao2(fio2, paco2)
         if pao2_alveolar is not None and pao2_alveolar > 0:
             crop_val = crop_index(
-                assessment.dynamic_compliance_value, mip,
+                cdyn, mip,
                 respiratory_rate, tidal_volume_ml, pao2, pao2_alveolar,
             )
             assessment.crop_value = round(crop_val, 1)
             if crop_val > 13:
-                assessment.crop_interpretation = "CROP > 13: Weaning likely to succeed"
+                assessment.crop_interpretation = "CROP > 13: historically favorable; not sufficient for an extubation decision"
             else:
-                assessment.crop_interpretation = "CROP <= 13: Weaning likely to fail"
+                assessment.crop_interpretation = "CROP <= 13: historical risk marker; not a standalone extubation decision"
 
     # SBT criteria checklist
     criteria = {}
@@ -357,53 +387,27 @@ def assess_weaning(
     assessment.sbt_criteria_met = sum(1 for v in criteria.values() if v)
     assessment.sbt_criteria_total = len(criteria)
 
-    # Overall recommendation
-    positive_indicators = 0
-    total_indicators = 0
-
-    total_indicators += 1
-    if rsbi_val < 105:
-        positive_indicators += 1
-
-    if 5.0 <= ve <= 10.0:
-        positive_indicators += 1
-    total_indicators += 1
-
-    if mip is not None:
-        total_indicators += 1
-        if abs(mip) >= 20:
-            positive_indicators += 1
-
-    if assessment.crop_value is not None:
-        total_indicators += 1
-        if assessment.crop_value > 13:
-            positive_indicators += 1
-
-    if criteria:
-        total_indicators += 1
-        if assessment.sbt_criteria_met == assessment.sbt_criteria_total:
-            positive_indicators += 1
-
-    if total_indicators > 0:
-        ratio = positive_indicators / total_indicators
-        if ratio >= 0.75:
-            assessment.weaning_likely = True
-            assessment.overall_recommendation = (
-                "Multiple indicators suggest weaning is likely to succeed. "
-                "Consider proceeding with spontaneous breathing trial (SBT)."
-            )
-        elif ratio >= 0.5:
-            assessment.weaning_likely = None
-            assessment.overall_recommendation = (
-                "Mixed indicators — some criteria met, some not. "
-                "Proceed with caution and close monitoring during SBT."
-            )
-        else:
-            assessment.weaning_likely = False
-            assessment.overall_recommendation = (
-                "Multiple indicators suggest weaning is likely to fail. "
-                "Continue mechanical ventilation and reassess."
-            )
+    # There is no validated voting score combining RSBI, minute ventilation,
+    # MIP, CROP and this partial checklist. Never infer SBT/extubation success.
+    assessment.weaning_likely = None
+    if not criteria:
+        assessment.overall_recommendation = (
+            "Bedside SBT readiness criteria were not supplied. Review the cause of "
+            "respiratory failure, oxygenation, hemodynamic stability and ability "
+            "to initiate breaths using a local liberation protocol."
+        )
+    elif not all(criteria.values()):
+        assessment.overall_recommendation = (
+            "At least one reported bedside consideration was not met. Review "
+            "the clinical context and local SBT protocol; calculated indices "
+            "must not override bedside assessment."
+        )
+    else:
+        assessment.overall_recommendation = (
+            "All supplied checklist items are marked met, but this is not a "
+            "validated readiness score. A clinician must assess SBT eligibility, "
+            "SBT performance and separate extubation considerations."
+        )
 
     return assessment
 
@@ -414,7 +418,6 @@ def assess_weaning(
 
 def _safe_path(path: str) -> str:
     """Validate path is safe (no directory traversal)."""
-    import os.path
     normalized = os.path.normpath(path)
     if normalized.startswith("..") or normalized.startswith("/..") or ".." in normalized.split(os.sep):
         raise ValueError(f"Path traversal detected: {path}")
@@ -431,6 +434,8 @@ def process_csv(input_path: str, output_path: str) -> int:
     """
     input_path = _safe_path(input_path)
     output_path = _safe_path(output_path)
+    if os.path.abspath(input_path) == os.path.abspath(output_path):
+        raise ValueError("Output CSV must differ from input CSV")
     results: List[Dict[str, Any]] = []
     with open(input_path, newline="", encoding="utf-8-sig") as f:
         reader = csv.DictReader(f)
@@ -442,7 +447,12 @@ def process_csv(input_path: str, output_path: str) -> int:
                 v = row.get(k, "")
                 if v in ("", None):
                     return None
-                return v.strip().lower() in ("1", "true", "yes", "y")
+                value = v.strip().lower()
+                if value in ("1", "true", "yes", "y"):
+                    return True
+                if value in ("0", "false", "no", "n"):
+                    return False
+                raise ValueError(f"Invalid boolean for {k}: {v!r}")
 
             a = assess_weaning(
                 respiratory_rate=float(row["respiratory_rate"]),
@@ -567,8 +577,10 @@ def main(argv=None):
 
     if args.cmd == "rsbi":
         val = rsbi(args.rr, args.vt)
-        print(json.dumps({"rsbi": round(val, 1), "threshold": 105,
-                          "weaning_likely": val < 105}, indent=2))
+        print(json.dumps({"rsbi": round(val, 1), "historical_threshold": 105,
+                          "below_historical_threshold": val < 105,
+                          "weaning_likely": None,
+                          "note": "RSBI alone cannot determine SBT or extubation readiness."}, indent=2))
         return 0
 
     if args.cmd == "batch":
@@ -577,11 +589,11 @@ def main(argv=None):
         return 0
 
     if args.cmd == "audit":
-        # Run a verification audit with the given task ID
+        # Legacy demonstration command; does not perform cryptographic verification.
         out = {
             "task_id": args.task_id,
-            "status": "AUDIT_OK",
-            "message": f"Audit verification completed for task {args.task_id}",
+            "status": "DEMONSTRATION_ONLY",
+            "message": "No audit operation was performed; use verify-audit for the in-memory HMAC chain.",
         }
         print(json.dumps(out, indent=2))
         return 0
@@ -591,7 +603,7 @@ def main(argv=None):
         query = " ".join(args.query)
         out = {
             "query": query,
-            "response": f"VentWean Sentinel: Clinical analysis verified for query: '{query[:60]}'. Parameters evaluated under AHA/ACC Guidelines.",
+            "response": "Demonstration chat only; no clinical interpretation or model inference was performed.",
         }
         print(json.dumps(out, indent=2))
         return 0

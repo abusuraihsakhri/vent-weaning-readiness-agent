@@ -1,187 +1,69 @@
-# Vent Weaning Readiness Agent
+# Ventilator Weaning Indices — VentWean Sentinel
 
-> **Domain:** Cardiovascular Medicine & Hemodynamic Analytics
-> **Reference Guidelines & Standards:** `AHA/ACC Practice Guidelines & ESC Clinical Standards`
+An educational adult ventilator-liberation calculator with a static browser UI, Python CLI, CSV processing and an optional FastAPI endpoint.
 
-<div align="center">
+**Clinical limitation:** Research and teaching only. Not a validated clinical decision-support device. It cannot establish readiness for a spontaneous breathing trial (SBT), SBT success or extubation safety.
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-![Python](https://img.shields.io/badge/Python-3.10%20%7C%203.11%20%7C%203.12-3776AB.svg?logo=python&logoColor=white)
-![FastAPI](https://img.shields.io/badge/FastAPI-0.111-009688.svg?logo=fastapi&logoColor=white)
-![Audit Trail](https://img.shields.io/badge/Audit-HMAC--SHA256_Tamper--Evident-brightgreen.svg)
-![Zero-PHI Guard](https://img.shields.io/badge/Guard-Zero--PHI_Outbound-blue.svg)
-![Docker](https://img.shields.io/badge/Docker-Ready-2496ED.svg?logo=docker&logoColor=white)
+## Browser application
 
-</div>
+Open `web/index.html` locally in a modern browser. The interface calculates respiratory indices, records optional reported bedside considerations and exports values as CSV. It processes data locally without a server or Python runtime. It does not transmit, store or share form values.
 
----
+The repository includes a GitHub Pages workflow to publish the `web/` directory. A live link will be added only after the deployed site has been verified.
 
-## 📖 What It Does
+## Calculations and evidence
 
-**Vent Weaning Readiness Agent** is an advanced analytical and computational platform implementing RSBI (<105) & Spontaneous Breathing Trial Extubation Supervisor. It provides clinical decision support for mechanical ventilation liberation through validated respiratory indices.
+- **RSBI** = respiratory rate / tidal volume in liters (breaths/min/L). The historical threshold of 105 is **not** a required SBT gatekeeper.
+- **Minute ventilation** = respiratory rate × tidal volume in liters (L/min).
+- **Static compliance** = tidal volume (mL) / (plateau pressure − PEEP).
+- **Dynamic compliance** = tidal volume (mL) / (peak pressure − PEEP).
+- **Alveolar PAO₂** = FiO₂ × (760 − 47) − PaCO₂ / 0.8 (sea-level approximation).
+- **CROP** = dynamic compliance × |MIP| × (PaO₂ / PAO₂) / respiratory rate; historical threshold >13.
 
----
+The 2024 AARC guideline suggests that RSBI is *not required* to screen for an SBT. Adequate oxygenation, hemodynamic stability, reversal of the underlying cause and the ability to initiate breaths are more clinically relevant screening domains. Indices alone cannot authorize extubation.
 
-## ⚙️ Key Capabilities & Algorithmic Modules
+Sources: [AARC 2024 SBT guideline](https://doi.org/10.4187/respcare.11735); [Yang and Tobin 1991](https://doi.org/10.1056/NEJM199105233242101); [ATS/CHEST 2017](https://doi.org/10.1164/rccm.201610-2075ST).
 
-### 🔬 Core Algorithmic & Evaluation Engines
+## Python quick start
 
-- **`WeaningAssessment`**: Complete weaning readiness assessment result including RSBI, CROP index, MIP interpretation, compliance calculations, and SBT criteria evaluation.
+Python 3.9 or later:
 
----
-
-## 📐 Mathematical Formulation & Logic
-
-```text
-- RSBI = f / VT (breaths/min/L)        — RSBI < 105: Weaning likely to succeed
-- CROP Index = (Cdyn * (PImax - f/VT)) * (PaO2/PAO2) / 100  — CROP > 13: Weaning likely to succeed
-- Minute Ventilation (VE) = f * VT     — Normal: 5-10 L/min
-- MIP/PImax: More negative = stronger   — MIP < -20 cmH2O: Adequate strength
-- Static Compliance = VT / (Pplat - PEEP)  — Normal: 60-100 mL/cmH2O
-- Dynamic Compliance = VT / (Ppeak - PEEP) — Normal: 40-80 mL/cmH2O
-```
-
----
-
-## 💻 CLI Quickstart & Usage
-
-### 1. Single Patient Assessment
-```bash
-python cli.py single --rr 18 --vt 450 --mip --mip -35 --pplat 20 --ppeak 25 --peep 5 --pao2 90 --fio2 0.3 --paco2 40
-```
-
-### 2. RSBI Only Calculation
-```bash
+~~~bash
+python -m pip install -e '.[api,test]'
 python cli.py rsbi --rr 20 --vt 400
-```
+python cli.py single --rr 18 --vt 450 --mip -35 --pplat 20 --ppeak 25 --peep 5 --pao2 90 --fio2 0.3 --paco2 40
+python cli.py batch -i sample.csv -o results.csv
+python cli.py serve --host 127.0.0.1 --port 8000
+~~~
 
-### 3. Batch CSV Processing
-```bash
-python cli.py batch -i data.csv -o results.csv
-```
+The installed command `vent-weaning-readiness-agent` uses this calculator. The compatibility-only `vent-weaning-readiness-legacy` command is a generic demonstration, not validated respiratory software.
 
-### 4. Audit Verification
-```bash
-python cli.py audit --task-id CASE-001
-python cli.py chat "Explain weaning criteria"
-python cli.py verify-audit
-```
+The optional API exposes `POST /api/weaning` with JSON, for example `{"respiratory_rate":18,"tidal_volume_ml":450}`, as well as `GET /health`. Legacy `POST /api/audit` remains demonstration logic with arbitrary thresholds, not clinical recommendations.
 
-### 5. Launch REST API Server
-```bash
-python cli.py serve --host 0.0.0.0 --port 8000
-```
+The HMAC-SHA256 audit log is **in-memory only**. Audit commands require a random `AUDIT_SECRET_KEY` of 32 characters or more. The identifier-pattern guard is incomplete and is not proof of HIPAA de-identification. Do not enter real patient identifiers. Legacy `audit` and `chat` commands do not conduct clinical verification or model inference; listed LLM providers currently return a deterministic mock.
 
-### Parameter Reference
-- `single`: Complete weaning assessment with all parameters
-- `rsbi`: Rapid Shallow Breathing Index calculation only
-- `batch`: Batch process CSV file
-- `audit`: Run audit verification
-- `chat`: Supervisory chat interface
-- `verify-audit`: Verify HMAC audit trail integrity
-- `serve`: Launch FastAPI REST server
+## Tests and deployment
 
-### Input Data Schema (for batch CSV)
+~~~bash
+python -m pip install -e '.[api,test]'
+pytest -q
+node --check web/calculator.js
+node --check web/app.js
+node --test web/test_calculator.cjs
+python -m pip install build && python -m build
+~~~
 
-| Field | Description | Requirement |
-|:------|:------------|:------------|
-| `respiratory_rate` | Breaths per minute | Required |
-| `tidal_volume_ml` | Tidal volume in mL | Required |
-| `mip` | Maximum inspiratory pressure (cmH2O) | Optional |
-| `plateau_pressure` | Plateau pressure (cmH2O) | Optional |
-| `peak_pressure` | Peak inspiratory pressure (cmH2O) | Optional |
-| `peep` | PEEP (cmH2O) | Optional |
-| `pao2` | PaO2 (mmHg) | Optional |
-| `fio2` | FiO2 (0.0-1.0) | Optional |
-| `paco2` | PaCO2 (mmHg) | Optional |
-| `patient_id` | Patient identifier | Optional |
+GitHub Actions runs Python tests on 3.10, 3.11 and 3.12 and Node-based browser calculation tests.
 
----
+Optional Docker server:
 
-## 🛡️ Security & Enterprise Architecture
-
-* **Zero-PHI Outbound Interceptor:** Active AST and regex inspection blocking SSNs, MRNs, phone numbers, and patient identifiers.
-* **Tamper-Evident HMAC-SHA256 Audit Trail:** Chained, cryptographically signed logs for every evaluation and state transition.
-* **Air-Gapped LLM Reasoning Adapter:** Agnostic integration for local Ollama instances (`llama3`, `mistral`), Claude 3.5 Sonnet, GPT-4o, and deterministic test mocks.
-* **Active Learning Bayesian Calibration:** Dynamic tracker updating worker reliability weights and monitoring Brier calibration drift.
-* **FastAPI & Prometheus Telemetry:** Exposes OpenAPI 3.1 REST endpoints and operational Prometheus metrics (`/metrics`).
-
-### Security Configuration
-
-The `AUDIT_SECRET_KEY` environment variable is **required** (minimum 32 characters). Set it before running:
-
-```bash
-# Linux/macOS
-export AUDIT_SECRET_KEY="your-strong-secret-key-here-minimum-32-chars-long"
-
-# Windows
-set AUDIT_SECRET_KEY=your-strong-secret-key-here-minimum-32-chars-long
-```
-
-Or copy `.env.example` to `.env` and configure:
-```bash
+~~~bash
 cp .env.example .env
-# Edit .env with your values
-```
+# Set AUDIT_SECRET_KEY to a cryptographically random value
+docker compose up --build
+~~~
 
----
+The static application uses modern browser JavaScript rather than Pyodide; it needs no Python runtime or remote services. Browser automation is not included, so compatibility is not claimed beyond the supported web standards.
 
-## 🧪 Testing & Verification
+## License
 
-Run the automated test suite:
-
-```bash
-pytest -v
-```
-
-Execute high-throughput batch simulation benchmarks:
-
-```bash
-python simulator.py 1000
-```
-
----
-
-## 🐳 Container Deployment
-
-```bash
-docker build -t vent-weaning-readiness-agent .
-docker run -p 8000:8000 --env-file .env vent-weaning-readiness-agent
-```
-
-Or using docker-compose:
-
-```bash
-cp .env.example .env
-# Edit .env with your AUDIT_SECRET_KEY
-docker-compose up -d
-```
-
----
-
-## 📁 Project Structure
-
-```
-vent-weaning-readiness-agent/
-├── agents/                      # Enterprise security, PHI guard, audit trail
-│   ├── base.py                  # PHIGuard, AuditTrail, AuditLogger
-│   ├── models.py                # Pydantic schemas
-│   ├── supervisor.py            # Multi-agent orchestrator
-│   ├── workers.py               # Specialized domain workers
-│   ├── api.py                   # FastAPI REST server
-│   ├── llm_factory.py           # LLM client factory
-│   ├── metrics.py               # Prometheus metrics
-│   ├── learning.py              # Bayesian calibration engine
-│   └── streamer.py              # WebSocket telemetry
-├── vent_weaning_readiness_agent/  # Alternative package implementation
-├── tests/                       # Pytest test suite
-├── web/                         # Operations console (HTML)
-├── vent_wean_sentinel.py        # Core calculations & CLI
-├── cli.py                       # CLI entry point
-├── simulator.py                 # High-throughput simulation
-├── enrichment.py                # Enrichment feature suite
-├── pyproject.toml               # Project configuration
-├── Dockerfile                   # Container build
-├── docker-compose.yml           # Container orchestration
-└── .env.example                 # Environment template
-```
+MIT — see [LICENSE](LICENSE).
