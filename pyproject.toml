@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "vent-weaning-readiness-agent"
 version = "2.0.0"
-description = "VentWean Sentinel: Mechanical Ventilation Liberation & RSBI Readiness Engine"
+description = "VentWean Sentinel: respiratory index calculator and optional demonstration API"
 readme = "README.md"
 authors = [{ name = "Dr. Abu Suraih Sakhri", email = "abusuraih@example.com" }]
 license = { text = "MIT" }
@@ -29,7 +29,8 @@ py-modules = ["vent_wean_sentinel", "enrichment", "simulator", "cli",
               "vent_wean_sentinel_app", "vent_weaning_readiness_agent_app"]
 
 [project.scripts]
-vent-weaning-readiness-agent = "vent_weaning_readiness_agent.cli:main"
+vent-weaning-readiness-agent = "vent_wean_sentinel:main"
+vent-weaning-readiness-legacy = "vent_weaning_readiness_agent.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/abusuraihsakhri/vent-weaning-readiness-agent"
